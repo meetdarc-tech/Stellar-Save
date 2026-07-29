@@ -1,5 +1,5 @@
 /**
- * Keeper/relayer service for automated payout execution (Issue #1026).
+ * Keeper/relayer service for automated payout execution (Issue #1026, #1305, #1306).
  *
  * Detects groups ready for payout (all members contributed in a cycle but no
  * PayoutExecuted event yet) and calls execute_payouts_batch via Soroban RPC.
@@ -13,6 +13,7 @@ import { Counter, Registry } from 'prom-client';
 import { logger } from '../logger';
 import { registry } from '../metrics';
 import { prisma } from '../prisma_client';
+import { IStellarClient, StellarClient } from '../lib/stellar_client';
 
 const MAX_RETRIES = 3;
 
@@ -41,8 +42,8 @@ interface DueGroup {
 
 // ── Core logic ────────────────────────────────────────────────────────────────
 
-async function findDueGroups(contractId: string): Promise<DueGroup[]> {
-  const contributions: Array<{ data: any }> = await (prisma as any).contractEvent.findMany({
+async function findDueGroups(contractId: string, db: any = prisma): Promise<DueGroup[]> {
+  const contributions: Array<{ data: any }> = await db.contractEvent.findMany({
     where: { contractId, eventType: 'ContributionMade' },
     select: { data: true },
   });
@@ -58,7 +59,7 @@ async function findDueGroups(contractId: string): Promise<DueGroup[]> {
     cycleMap.get(key)!.add(member);
   }
 
-  const payouts: Array<{ data: any }> = await (prisma as any).contractEvent.findMany({
+  const payouts: Array<{ data: any }> = await db.contractEvent.findMany({
     where: { contractId, eventType: 'PayoutExecuted' },
     select: { data: true },
   });
@@ -81,39 +82,24 @@ async function findDueGroups(contractId: string): Promise<DueGroup[]> {
   return due;
 }
 
-async function executePayoutsBatch(groupIds: string[], contractId: string, rpcUrl: string): Promise<void> {
-  const payload = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'simulateTransaction',
-    params: {
-      transaction: JSON.stringify({ contract: contractId, function: 'execute_payouts_batch', args: { group_ids: groupIds } }),
-    },
-  };
-
-  const res = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) throw new Error(`Soroban RPC error: ${res.status}`);
-  const body = (await res.json()) as { result?: unknown; error?: { message?: string } };
-  if (body.error) throw new Error(`Soroban RPC returned error: ${body.error.message}`);
-}
-
 // ── KeeperJob class ───────────────────────────────────────────────────────────
 
 export class KeeperJob {
   private contractId: string;
-  private rpcUrl: string;
+  private stellarClient: IStellarClient;
+  private db: any;
   private task?: CronJob;
   /** Tracks consecutive failure count per group:cycle key. */
   private retryMap = new Map<string, number>();
 
-  constructor(contractId: string, rpcUrl: string) {
+  constructor(contractId: string, rpcUrlOrClient: string | IStellarClient, dbClient?: any) {
     this.contractId = contractId;
-    this.rpcUrl = rpcUrl;
+    if (typeof rpcUrlOrClient === 'string') {
+      this.stellarClient = new StellarClient(rpcUrlOrClient);
+    } else {
+      this.stellarClient = rpcUrlOrClient;
+    }
+    this.db = dbClient ?? prisma;
   }
 
   start(schedule: string): void {
@@ -130,7 +116,7 @@ export class KeeperJob {
   }
 
   async runOnce(): Promise<void> {
-    const due = await findDueGroups(this.contractId);
+    const due = await findDueGroups(this.contractId, this.db);
     if (due.length === 0) {
       logger.debug('[keeper] no groups due for payout');
       return;
@@ -148,7 +134,7 @@ export class KeeperJob {
     logger.info('[keeper] executing payouts batch', { groupIds });
 
     try {
-      await executePayoutsBatch(groupIds, this.contractId, this.rpcUrl);
+      await this.stellarClient.executePayoutsBatch(groupIds, this.contractId);
       keeperPayoutsExecuted.inc({ status: 'success' }, groupIds.length);
       for (const g of actionable) this.retryMap.delete(`${g.groupId}:${g.cycleNumber}`);
     } catch (err: any) {
@@ -174,8 +160,13 @@ export class KeeperJob {
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
-export function startKeeperJob(schedule: string, contractId: string, rpcUrl: string): KeeperJob {
-  const job = new KeeperJob(contractId, rpcUrl);
+export function startKeeperJob(
+  schedule: string,
+  contractId: string,
+  rpcUrlOrClient: string | IStellarClient,
+  dbClient?: any
+): KeeperJob {
+  const job = new KeeperJob(contractId, rpcUrlOrClient, dbClient);
   job.start(schedule);
   return job;
 }

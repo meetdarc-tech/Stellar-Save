@@ -2,8 +2,7 @@ import request from 'supertest';
 import express from 'express';
 import { createRampRouter } from '../../src/routes/ramp';
 import { issueJwt } from '../../src/auth_service';
-
-const TEST_WALLET = 'GDQNY3PBOJOKYZSRMK2S7LHHGWZIUISD4QORETLMXEWXBI7KFZZMKTL3';
+import { TEST_ACCOUNT as TEST_WALLET } from '../fixtures/sep24';
 
 function buildApp() {
   const app = express();

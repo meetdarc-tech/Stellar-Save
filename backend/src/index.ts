@@ -34,6 +34,7 @@ import { createV2Router } from './routes/v2';
 import { metricsMiddleware, metricsHandler } from './metrics';
 import { requestLogger } from './logger';
 import { disconnectPrisma, prisma } from './prisma_client';
+import { StellarClient } from './lib/stellar_client';
 import { createRateLimiterMiddleware, createAuthRateLimiterMiddleware } from './rate_limiter';
 import { createTieredRateLimiter, configureTier, setEndpointCost } from './redis_rate_limiter';
 import { createQuotaReporterRouter } from './routes/quota_reporter';
@@ -231,9 +232,10 @@ if (config.analyticsResync.enabled) {
   startAnalyticsResyncJob(config.analyticsResync.schedule);
 }
 
-// Start keeper/relayer for automated payout execution (Issue #1026)
+// Start keeper/relayer for automated payout execution (Issue #1026, #1305)
 if (config.keeper.enabled) {
-  startKeeperJob(config.keeper.schedule, config.indexer.contractId, config.stellar.rpcUrl);
+  const stellarClient = new StellarClient(config.stellar.rpcUrl);
+  startKeeperJob(config.keeper.schedule, config.indexer.contractId, stellarClient, prisma);
 }
 
 const services = {

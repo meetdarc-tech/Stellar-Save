@@ -23,6 +23,7 @@ import { adminAuthMiddleware } from '../auth_middleware';
 import { apiKeyService } from '../api_key_service';
 import { apiKeyAuthMiddleware, recordApiUsage } from '../api_key_rate_limiter';
 import { AdminService } from '../admin_service';
+import { readinessCheckCache } from '../redis';
 
 // ── Shared service instances (passed in from app) ────────────────────────────
 export interface V1Services {
@@ -130,15 +131,9 @@ export function createV1Router(services: V1Services): Router {
 
   // Health
   router.get('/health', (req, res) => {
-    const responseTimeMs = Date.now() - (req as any).__startTimeMs;
     res.json({
       status: 'ok',
       version: 'v1',
-      responseTimeMs,
-      dependencies: {
-        database: { up: true },
-        horizon: { up: true },
-      },
     });
   });
 
@@ -146,13 +141,14 @@ export function createV1Router(services: V1Services): Router {
   router.get('/ready', async (req, res) => {
     const requestStart = Date.now();
 
-    const [database, horizon] = await Promise.all([
+    const [database, horizon, cache] = await Promise.all([
       eventIndexer.readinessCheckDatabase(),
       eventIndexer.readinessCheckHorizon(),
+      readinessCheckCache(),
     ]);
 
     const responseTimeMs = Date.now() - requestStart;
-    const up = database.up && horizon.up;
+    const up = database.up && horizon.up && cache.up;
 
     res.status(up ? 200 : 503).json({
       status: up ? 'ready' : 'not_ready',
@@ -161,6 +157,7 @@ export function createV1Router(services: V1Services): Router {
       dependencies: {
         database,
         horizon,
+        cache,
       },
     });
   });

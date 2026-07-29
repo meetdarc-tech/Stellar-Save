@@ -22,8 +22,9 @@
 3. Attempt restart:
    ```bash
    docker restart stellar-save-backend
-   # Wait 30s, then verify:
-   curl http://localhost:3001/api/v2/health
+   # Wait 30s, then verify readiness (checks DB, Cache, and Horizon connectivity):
+   curl -f http://localhost:3001/api/v2/ready
+   # (Note: /api/v2/health checks only process liveness. Use /ready to check dependencies)
    ```
 
 4. If restart fails, check for port conflict or OOM:

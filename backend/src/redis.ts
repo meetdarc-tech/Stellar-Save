@@ -47,4 +47,18 @@ export const delPattern = async (pattern: string) => {
   }
 };
 
+export const readinessCheckCache = async (): Promise<{ up: boolean; latencyMs: number; error?: string }> => {
+  const start = Date.now();
+  try {
+    await redis.ping();
+    return { up: true, latencyMs: Date.now() - start };
+  } catch (err: any) {
+    return {
+      up: false,
+      latencyMs: Date.now() - start,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+};
+
 export default redis; 

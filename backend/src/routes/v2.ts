@@ -6,6 +6,7 @@ import { notificationService } from '../notification_service';
 import { prisma } from '../prisma_client';
 import { logger } from '../logger';
 import { config } from '../config';
+import { readinessCheckCache } from '../redis';
 
 /**
  * Transforms a v1 response shape into v2 shape.
@@ -21,18 +22,13 @@ export function createV2Router(services: V1Services): Router {
   const router = Router();
   const { engine, backupService } = services;
 
-  // Health — v2 adds uptime and pool metrics
+  // Health — v2 adds uptime
   router.get('/health', (_req: Request, res: Response) => {
     res.json(
       migrateV1ToV2({
         status: 'ok',
         version: 'v2',
         uptime: process.uptime(),
-        responseTimeMs: 0,
-        dependencies: {
-          database: { up: true },
-          horizon: { up: true },
-        },
       })
     );
   });
@@ -41,20 +37,21 @@ export function createV2Router(services: V1Services): Router {
   router.get('/ready', async (_req: Request, res: Response) => {
     const start = Date.now();
 
-    const [database, horizon] = await Promise.all([
+    const [database, horizon, cache] = await Promise.all([
       services.eventIndexer.readinessCheckDatabase(),
       services.eventIndexer.readinessCheckHorizon(),
+      readinessCheckCache(),
     ]);
 
     const responseTimeMs = Date.now() - start;
-    const up = database.up && horizon.up;
+    const up = database.up && horizon.up && cache.up;
 
     res.status(up ? 200 : 503).json(
       migrateV1ToV2({
         status: up ? 'ready' : 'not_ready',
         version: 'v2',
         responseTimeMs,
-        dependencies: { database, horizon },
+        dependencies: { database, horizon, cache },
       })
     );
   });

@@ -15,13 +15,13 @@
 import request from 'supertest';
 import { Sep24Sandbox } from '../helpers/sep24-sandbox';
 import { Server } from 'http';
+import { TEST_ACCOUNT } from '../fixtures/sep24';
 
 describe('SEP-24 Fiat Ramp Integration Tests', () => {
   let sandbox: Sep24Sandbox;
   let sandboxApp: any;
   let sandboxServer: Server;
   const SANDBOX_URL = 'http://localhost:8545';
-  const TEST_ACCOUNT = 'GDQNY3PBOJOKYZSRMK2S7LHHGWZIUISD4QORETLMXEWXBI7KFZZMKTL3';
   let authToken: string;
 
   beforeAll((done) => {
